@@ -11,6 +11,7 @@ oses:
 Write-Output "Running [<%= @host.name %>] host initial configuration"
 
 #need to see if the script is being ran elevated.
+$checkadminrights = invoke-command -computername $env:COMPUTERNAME -command { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}
 if ($checkadminrights -ne $true)
     {
     Write-Output "Please run Elevated as and Administrator"

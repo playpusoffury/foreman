@@ -1,0 +1,89 @@
+<%#
+kind: host_init_config
+name: Windows host_init_config default
+model: ProvisioningTemplate
+oses:
+- Windows
+-%>
+
+<% built_https = foreman_url('built').start_with?('https') -%>
+
+Write-Output "Running [<%= @host.name %>] host initial configuration"
+
+#need to see if the script is being ran elevated.
+if ($checkadminrights -ne $true)
+    {
+    Write-Output "Please run Elevated as and Administrator"
+    }
+    
+Write-output "# Running [<%= @host.name %>] host initial configuration"
+
+<% if built_https -%>
+[string]$SSL_CA_CERT = <%= foreman_server_ca_cert %>
+<% end -%>
+
+Disable-sslverification
+
+function foreman_curl
+{
+curl --silent --show-error <%= '--cacert $SSL_CA_CERT' if built_https %> -o $null \* "$@"
+}
+
+exit_and_cancel_build() {
+  echo 'Host [<%= @host.name %>] initial configuration failed'
+  foreman_curl --request POST '<%= foreman_url('failed') %>' \
+       --data 'Host initial configuration failed, please see the registration log for more details.'
+  exit 1
+}
+
+<% if host_puppet_server.present? -%>
+<%= snippet 'puppetlabs_repo' %>
+<%= snippet 'puppet_setup' %>
+<% end -%>
+
+
+######unfinished#######
+#still need to convert
+# Call home to exit build mode
+foreman_curl '<%= foreman_url('built') %>'
+
+if [[ $? == 0 ]] ; then
+  echo "Host [<%= @host.name %>] successfully configured."
+else
+  echo "Host [<%= @host.name %>] successfully configured, but failed to set built status."
+fi
+######################
+
+Enable-Sslverification
+exit
+
+
+
+
+#all to allow self signed certs. 
+function Disable-SslVerification
+{
+    if (-not ([System.Management.Automation.PSTypeName]"TrustEverything").Type)
+    {
+        Add-Type -TypeDefinition  @"
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class TrustEverything
+{
+    private static bool ValidationCallback(object sender, X509Certificate certificate, X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) { return true; }
+    public static void SetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = ValidationCallback; }
+    public static void UnsetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = null; }
+}
+"@
+    }
+    [TrustEverything]::SetCallback()
+}
+
+function Enable-SslVerification
+{
+    if (([System.Management.Automation.PSTypeName]"TrustEverything").Type)
+    {
+        [TrustEverything]::UnsetCallback()
+    }
+}

@@ -27,52 +27,19 @@ model: ProvisioningTemplate
 <%= "\n# Activation keys: [#{activation_keys}]" if activation_keys.present? -%>
 
 
-if ! [ $(id -u) = 0 ]; then
-    echo "Please run as root"
-    exit 1
-fi
 
-if [ -f /etc/os-release ] ; then
-  . /etc/os-release
-fi
+#need to see if the script is being ran elevated.
+$checkadminrights = invoke-command -computername $env:COMPUTERNAME -command { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}
+if ($checkadminrights -ne $true)
+    {
+    Write-Output "Please run Elevated as and Administrator"
+    Read-host "Press any key to exit"
+    exit
+    }
 
-SSL_CA_CERT=$(mktemp)
-cat << EOF > $SSL_CA_CERT
-<%= foreman_server_ca_cert %>
-EOF
 
-<% unless @repo.blank? -%>
-echo '#'
-echo '# Adding repository'
-echo '#'
+[string]$SSL_CA_CERT = <%= foreman_server_ca_cert %>
 
-if [ -f /etc/redhat-release ]; then
-  cat << EOF > /etc/yum.repos.d/foreman_registration.repo
-[foreman_register]
-name=foreman_register
-baseurl=<%= shell_escape @repo %>
-enabled=1
-gpgcheck=<%= @repo_gpg_key_url.present? ? 1 : 0 %>
-gpgkey=<%= shell_escape @repo_gpg_key_url %>
-EOF
-
-  echo "Building yum metadata cache, this may take a few minutes"
-  yum makecache
-elif [ x$ID = xdebian ] || [ x$ID = xubuntu ]; then
-  cat << EOF > /etc/apt/sources.list.d/foreman_registration.list
-<%= shell_escape @repo %>
-EOF
-<% if @repo_gpg_key_url.present? -%>
-  apt-get -y install ca-certificates gpg
-  curl --silent --show-error <%= shell_escape @repo_gpg_key_url %> | apt-key add -
-<% end -%>
-  apt-get update
-
-else
-  echo "Unsupported operating system, can't add repository."
-  exit 1
-fi
-<% end -%>
 
 register_host() {
   curl --silent --show-error --cacert $SSL_CA_CERT --request POST <%= @registration_url %> \
@@ -85,11 +52,11 @@ register_host() {
 <%= "       --data 'host[hostgroup_id]=#{@hostgroup.id}' \\\n" if @hostgroup -%>
 <%= "       --data 'host[operatingsystem_id]=#{@operatingsystem.id}' \\\n" if @operatingsystem -%>
 <%= "       --data host[interfaces_attributes][0][identifier]=#{shell_escape(@remote_execution_interface)} \\\n" if @remote_execution_interface.present? -%>
-<%= "       --data 'setup_insights=#{@setup_insights}' \\\n" unless @setup_insights.nil? -%>
-<%= "       --data 'setup_remote_execution=#{@setup_remote_execution}' \\\n" unless @setup_remote_execution.nil? -%>
-<%= "       --data remote_execution_interface=#{shell_escape(@remote_execution_interface)} \\\n" if @remote_execution_interface.present? -%>
-<%= "       --data packages=#{shell_escape(@packages)} \\\n" if @packages.present? -%>
-<%= "       --data 'update_packages=#{@update_packages}' \\\n" unless @update_packages.nil? -%>
+#<%= "       --data 'setup_insights=#{@setup_insights}' \\\n" unless @setup_insights.nil? -%>
+#<%= "       --data 'setup_remote_execution=#{@setup_remote_execution}' \\\n" unless @setup_remote_execution.nil? -%>
+#<%= "       --data remote_execution_interface=#{shell_escape(@remote_execution_interface)} \\\n" if @remote_execution_interface.present? -%>
+#<%= "       --data packages=#{shell_escape(@packages)} \\\n" if @packages.present? -%>
+#<%= "       --data 'update_packages=#{@update_packages}' \\\n" unless @update_packages.nil? -%>
 
 }
 
@@ -97,64 +64,6 @@ echo "#"
 echo "# Running registration"
 echo "#"
 
-<% if plugin_present?('katello') -%>
-if [ -f /etc/redhat-release ]; then
-    register_katello_host(){
-        UUID=$(subscription-manager identity | head -1 | awk '{print $3}')
-        curl --silent --show-error --cacert $SSL_CA_CERT --request POST "<%= @registration_url %>" \
-             --data "uuid=$UUID" \
-             <%= headers.join(' ') %> \
-<%= "          --data 'host[organization_id]=#{@organization.id}' \\\n" if @organization -%>
-<%= "          --data 'host[location_id]=#{@location.id}' \\\n" if @location -%>
-<%= "          --data 'host[hostgroup_id]=#{@hostgroup.id}' \\\n" if @hostgroup -%>
-<%= "          --data 'host[lifecycle_environment_id]=#{@lifecycle_environment_id}' \\\n" if @lifecycle_environment_id.present? -%>
-<%= "          --data 'setup_insights=#{@setup_insights}' \\\n" unless @setup_insights.nil? -%>
-<%= "          --data 'setup_remote_execution=#{@setup_remote_execution}' \\\n" unless @setup_remote_execution.nil? -%>
-<%= "          --data remote_execution_interface=#{shell_escape(@remote_execution_interface)} \\\n" if @remote_execution_interface.present? -%>
-<%= "          --data packages=#{shell_escape(@packages)} \\\n" if @packages.present? -%>
-<%= "          --data 'update_packages=#{@update_packages}' \\\n" unless @update_packages.nil? -%>
-
-}
-
-    <% if @force -%>
-    if [ -x "$(command -v subscription-manager)" ] ; then
-      subscription-manager unregister || true
-      subscription-manager clean
-    fi
-
-    yum remove -y katello-ca-consumer\*
-    <% end -%>
-
-    # rhn-client-tools conflicts with subscription-manager package
-    # since rhn tools replaces subscription-manager, we need to explicitly
-    # install subscription-manager after the rhn tools cleanup
-    if [ x$ID = xol ]; then
-      yum remove -y rhn-client-tools
-      yum install -y --setopt=obsoletes=0 subscription-manager
-    fi
-
-    CONSUMER_RPM=$(mktemp --suffix .rpm)
-    curl --silent --show-error --output $CONSUMER_RPM <%= subscription_manager_configuration_url(hostname: @url_host) %>
-
-    # Workaround for systems with enabled FIPS,
-    # where installation of RPM generated on RHEL7 cause 'no digest' error
-    # See https://projects.theforeman.org/issues/32068
-    if [ "$(cat /proc/sys/crypto/fips_enabled)" = "1" ]; then
-        rpm -ivh --nodigest --nofiledigest $CONSUMER_RPM
-    else
-        yum localinstall $CONSUMER_RPM -y
-    fi
-
-    rm -f $CONSUMER_RPM
-
-    subscription-manager register <%= '--force' if @force %> \
-        --org='<%= @organization.label %>' \
-        --activationkey=<%= shell_escape(activation_keys) %> || <%= @ignore_subman_errors ? 'true' : 'exit 1' %>
-
-    register_katello_host | bash
-else
-    register_host | bash
-fi
-<% else -%>
+####need to update this
 register_host | bash
 <% end -%>

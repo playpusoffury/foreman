@@ -21,6 +21,11 @@ if ($checkadminrights -ne $true)
     
 Write-output "# Running [<%= @host.name %>] host initial configuration"
 
+#to be added... need token and uri:
+$headers = @{Authorization = "Bearer $bearer_token"}
+$response = Invoke-RestMethod -ContentType "$contentType" -Uri $url -Method $method -Headers $headers -UseBasicParsing
+
+
 <% if built_https -%>
 [string]$SSL_CA_CERT = <%= foreman_server_ca_cert %>
 <% end -%>

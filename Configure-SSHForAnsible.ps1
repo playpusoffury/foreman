@@ -1,5 +1,5 @@
 #should be the only variable to put up.
-$site = "https://foremanhost:8443" +"/ssh/pubkey"
+$site = "https://192.168.1.6:8443/ssh/pubkey"
 
 Disable-SslVerification
 
@@ -29,9 +29,14 @@ foreach($r in $fwRule) { Set-NetFirewallRule -Name $r.Name -RemoteAddress $ips }
 # You ALSO MUST of course, replace the item below 'Place the... (etc) with the content of your desired pub key portion of your ssh key.
 # Ed25519 is recommended and works from macOS (Mojave, Catalina) to Windows. See https://medium.com/risan/upgrade-your-ssh-key-to-ed25519-c6e8d60d3c54
 
-if (Test-Path C:\Users\Administrator\.ssh -eq $false)
+if ((Test-Path 'C:\Users\Administrator\.ssh') -eq $false)
 {
 mkdir 'C:\Users\Administrator\.ssh'
+}
+
+if ((Test-Path 'C:\Users\Administrator\.ssh\authorized_keys') -eq $true)
+{
+Remove-Item 'C:\Users\Administrator\.ssh\authorized_keys'
 }
 
 New-Item 'C:\Users\Administrator\.ssh\authorized_keys'
@@ -40,7 +45,7 @@ $keys = Invoke-WebRequest -Uri $site
 
 
 # Write public key to file
-$keys | Set-Content –Path "c:\users\$user\.ssh\authorized_keys"
+$keys | Set-Content –Path "c:\users\administrator\.ssh\authorized_keys"
 
 #last bit is to set the authorized key items so password auth is restricted and authorized keys are allowed:
 

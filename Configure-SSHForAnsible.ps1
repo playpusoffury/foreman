@@ -1,6 +1,41 @@
 #should be the only variable to put up.
 $site = "https://192.168.1.6:8443/ssh/pubkey"
 
+#Allowed IP's for access... or range:
+#Com seperated @("10.0.0.1","172.14.1.0-200")
+$ips = @("192.168.1.1-192.168.1.254")
+
+
+#just in case site is self signed
+#all to allow self signed certs. 
+function Disable-SslVerification
+{
+    if (-not ([System.Management.Automation.PSTypeName]"TrustEverything").Type)
+    {
+        Add-Type -TypeDefinition  @"
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class TrustEverything
+{
+    private static bool ValidationCallback(object sender, X509Certificate certificate, X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) { return true; }
+    public static void SetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = ValidationCallback; }
+    public static void UnsetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = null; }
+}
+"@
+    }
+    [TrustEverything]::SetCallback()
+}
+
+function Enable-SslVerification
+{
+    if (([System.Management.Automation.PSTypeName]"TrustEverything").Type)
+    {
+        [TrustEverything]::UnsetCallback()
+    }
+}
+
+
 Disable-SslVerification
 
 $sshstatus = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.server*'
@@ -19,9 +54,6 @@ Start-Service sshd
 Set-NetFirewallrule -Name "OpenSSH-Server-In-TCP" -Action Allow
 $fwRule = Get-NetFirewallrule -Name "OpenSSH-Server-In-TCP"
 
-#Allowed IP's for access... or range:
-#Com seperated @("10.0.0.1","172.14.1.0-200")
-$ips = @("192.168.1.1-192.168.1.254")
 foreach($r in $fwRule) { Set-NetFirewallRule -Name $r.Name -RemoteAddress $ips }
 
 ## Setup ssh key-based authentication. 
@@ -61,33 +93,3 @@ $keys | Set-Content –Path "c:\users\administrator\.ssh\authorized_keys"
 #restart to take affect
 Restart-Service sshd
 Enable-SslVerification
-
-
-#just in case site is self signed
-#all to allow self signed certs. 
-function Disable-SslVerification
-{
-    if (-not ([System.Management.Automation.PSTypeName]"TrustEverything").Type)
-    {
-        Add-Type -TypeDefinition  @"
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-public static class TrustEverything
-{
-    private static bool ValidationCallback(object sender, X509Certificate certificate, X509Chain chain,
-        SslPolicyErrors sslPolicyErrors) { return true; }
-    public static void SetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = ValidationCallback; }
-    public static void UnsetCallback() { System.Net.ServicePointManager.ServerCertificateValidationCallback = null; }
-}
-"@
-    }
-    [TrustEverything]::SetCallback()
-}
-
-function Enable-SslVerification
-{
-    if (([System.Management.Automation.PSTypeName]"TrustEverything").Type)
-    {
-        [TrustEverything]::UnsetCallback()
-    }
-}
